@@ -1,66 +1,341 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# DA Bridge: деплой на сервер (прод)
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Подходит для VPS с Ubuntu 24.04. Для десятков стримеров достаточно 1 vCPU и 1-2 ГБ RAM. Нужен **домен** (виджетам требуется `wss://`, а значит TLS-сертификат).
 
-## About Laravel
+Примеры ниже используют домен `example.com` и путь `/var/www/da-bridge`. Замените на свои.
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+## 1. Подготовка сервера
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+```bash
+apt update && apt upgrade -y
+apt install -y nginx mysql-server supervisor certbot python3-certbot-nginx git unzip ufw fail2ban \
+  php8.3-cli php8.3-fpm php8.3-mysql php8.3-mbstring php8.3-xml php8.3-curl php8.3-zip php8.3-bcmath php8.3-intl
+curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
+```
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+Swap на случай пиков памяти (для 2 ГБ RAM):
 
-## Learning Laravel
+```bash
+fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
+echo '/swapfile none swap sw 0 0' >> /etc/fstab
+```
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+DNS: создайте A-запись `example.com` → IP сервера.
 
-You may also try the [Laravel Bootcamp](https://bootcamp.laravel.com), where you will be guided through building a modern Laravel application from scratch.
+## 2. База данных
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+```bash
+mysql
+```
+```sql
+CREATE DATABASE da_bridge CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER 'da_bridge'@'localhost' IDENTIFIED BY 'Rfgbnjirf_5891';
+GRANT ALL PRIVILEGES ON da_bridge.* TO 'da_bridge'@'localhost';
+FLUSH PRIVILEGES;
+```
 
-## Laravel Sponsors
+MySQL должен слушать только `127.0.0.1` (по умолчанию в Ubuntu так и есть: `bind-address = 127.0.0.1`).
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+## 3. Код и зависимости
 
-### Premium Partners
+```bash
+mkdir -p /var/www/da-bridge && cd /var/www/da-bridge
+# загрузите проект (git clone / scp / rsync)
+composer install --no-dev --optimize-autoloader
+cp .env.example .env
+php artisan key:generate
+chown -R www-data:www-data storage bootstrap/cache
+chmod -R 775 storage bootstrap/cache
+```
 
-- **[Vehikl](https://vehikl.com/)**
-- **[Tighten Co.](https://tighten.co)**
-- **[WebReinvent](https://webreinvent.com/)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel/)**
-- **[Cyber-Duck](https://cyber-duck.co.uk)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Jump24](https://jump24.co.uk)**
-- **[Redberry](https://redberry.international/laravel/)**
-- **[Active Logic](https://activelogic.com)**
-- **[byte5](https://byte5.de)**
-- **[OP.GG](https://op.gg)**
+> **Сохраните `APP_KEY` в надёжном месте.** Токены стримеров шифруются этим ключом. Потеряете или смените ключ, и всех придётся подключать заново.
 
-## Contributing
+## 4. `.env` для прода
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+```env
+APP_NAME="DA Bridge"
+APP_ENV=production
+APP_DEBUG=false
+APP_URL=https://example.com
 
-## Code of Conduct
+DB_CONNECTION=mysql
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_DATABASE=da_bridge
+DB_USERNAME=da_bridge
+DB_PASSWORD=СЛОЖНЫЙ_ПАРОЛЬ
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+SESSION_DRIVER=database
+SESSION_SECURE_COOKIE=true
+SESSION_SAME_SITE=lax
+CACHE_STORE=database
+QUEUE_CONNECTION=database
 
-## Security Vulnerabilities
+LOG_CHANNEL=daily
+LOG_DAILY_DAYS=14
+LOG_LEVEL=warning
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+DONATIONALERTS_CLIENT_ID=...
+DONATIONALERTS_CLIENT_SECRET=...        # сгенерируйте НОВЫЙ секрет для прода
+DONATIONALERTS_REDIRECT_URI=https://example.com/da/callback
 
-## License
+ADMIN_LOGIN=придумайте_не_admin
+ADMIN_PASSWORD_HASH='$2y$12$...'
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+BROADCAST_CONNECTION=reverb
+REVERB_APP_ID=сгенерируйте
+REVERB_APP_KEY=сгенерируйте
+REVERB_APP_SECRET=сгенерируйте
+REVERB_HOST=example.com                 # адрес, который видят клиенты
+REVERB_PORT=443
+REVERB_SCHEME=https
+REVERB_SERVER_HOST=127.0.0.1            # слушаем только локально, наружу идёт через nginx
+REVERB_SERVER_PORT=8080
+
+SITE_NAME="DA Bridge"
+SITE_OPERATOR="ФИО / ИП / самозанятый"
+SITE_CONTACT_EMAIL=you@example.com
+```
+
+Генерация значений:
+
+```bash
+php -r "echo bin2hex(random_bytes(10)),PHP_EOL;"                 # APP_ID, APP_KEY
+php -r "echo bin2hex(random_bytes(20)),PHP_EOL;"                 # APP_SECRET
+php artisan tinker --execute="echo Hash::make('надёжный_пароль');"
+```
+
+## 5. Миграции и кэш
+
+```bash
+php artisan migrate --force
+php artisan optimize          # config, route, view, event cache
+```
+
+После любого изменения `.env` выполняйте `php artisan optimize:clear && php artisan optimize`.
+
+## 6. nginx
+
+`/etc/nginx/sites-available/da-bridge`:
+
+```nginx
+map $http_upgrade $connection_upgrade { default upgrade; '' close; }
+
+server {
+    listen 80;
+    server_name example.com;
+    root /var/www/da-bridge/public;
+    index index.php;
+    client_max_body_size 2m;
+    server_tokens off;
+
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    # WebSocket (виджеты) и HTTP API Reverb (бэкенд публикует события)
+    location ~ ^/(app|apps)(/|$) {
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header Scheme $scheme;
+        proxy_set_header SERVER_PORT $server_port;
+        proxy_set_header REMOTE_ADDR $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_read_timeout 3600s;
+        proxy_pass http://127.0.0.1:8080;
+    }
+
+    # Админка только с вашего IP (замените)
+    location ^~ /admin {
+        allow ВАШ.IP.АДРЕС;
+        deny all;
+        try_files $uri /index.php?$query_string;
+    }
+
+    location / { try_files $uri $uri/ /index.php?$query_string; }
+
+    location ~ \.php$ {
+        fastcgi_pass unix:/run/php/php8.3-fpm.sock;
+        fastcgi_param SCRIPT_FILENAME $realpath_root$fastcgi_script_name;
+        include fastcgi_params;
+    }
+
+    location ~ /\.(?!well-known) { deny all; }
+
+    gzip on;
+    gzip_types text/css application/javascript application/json image/svg+xml;
+    location ~* \.(css|js|svg|png|jpg|woff2)$ { expires 30d; access_log off; }
+}
+```
+
+```bash
+ln -s /etc/nginx/sites-available/da-bridge /etc/nginx/sites-enabled/
+nginx -t && systemctl reload nginx
+certbot --nginx -d example.com --redirect
+```
+
+`certbot` сам добавит HTTPS-сервер, редирект с HTTP и автопродление. Проверка продления: `certbot renew --dry-run`.
+
+> Если динамический IP, не ограничивайте `/admin` по IP, а защитите его basic-auth поверх пароля (`auth_basic`) или VPN.
+
+## 7. Supervisor (процессы-демоны)
+
+`/etc/supervisor/conf.d/da-bridge.conf`:
+
+```ini
+[program:da-reverb]
+command=php /var/www/da-bridge/artisan reverb:start
+directory=/var/www/da-bridge
+user=www-data
+autostart=true
+autorestart=true
+stopwaitsecs=10
+redirect_stderr=true
+stdout_logfile=/var/www/da-bridge/storage/logs/reverb.log
+
+[program:da-listen]
+command=php /var/www/da-bridge/artisan da:listen
+directory=/var/www/da-bridge
+user=www-data
+autostart=true
+autorestart=true
+stopwaitsecs=10
+redirect_stderr=true
+stdout_logfile=/var/www/da-bridge/storage/logs/da-listen.log
+```
+
+```bash
+supervisorctl reread && supervisorctl update
+supervisorctl status
+```
+
+Оба процесса должны быть в состоянии `RUNNING`. Если соединений с виджетами станет больше ~1000, поднимите лимит открытых файлов (`minfds=10000` в секции `[supervisord]` файла `/etc/supervisor/supervisord.conf`).
+
+## 8. DonationAlerts и виджет
+
+1. В настройках приложения DA замените Redirect URI на `https://example.com/da/callback`.
+2. Сгенерируйте новый Client Secret для прода и впишите его в `.env`.
+3. В коде виджета StreamElements:
+
+```js
+const pusher = new Pusher('ВАШ_REVERB_APP_KEY', {
+  cluster: 'mt1',
+  wsHost: 'example.com',
+  wssPort: 443,
+  forceTLS: true,
+  enabledTransports: ['ws', 'wss'],
+});
+```
+
+## 9. Проверка после запуска
+
+- `https://example.com` открывается, замочек в браузере зелёный.
+- `https://example.com/up` отвечает 200 (встроенная проверка Laravel).
+- Вход через DA работает, в `/admin` статус «online».
+- `test.html` с прод-настройками (хост `example.com`, порт 443, шифрование включено) получает тестовый донат.
+- `supervisorctl status` показывает оба демона `RUNNING`.
+
+## 10. Обновление версии
+
+```bash
+cd /var/www/da-bridge
+php artisan down
+git pull                                   # или загрузите новые файлы
+composer install --no-dev --optimize-autoloader
+php artisan migrate --force
+php artisan optimize:clear && php artisan optimize
+supervisorctl restart da-reverb da-listen
+systemctl reload php8.3-fpm
+php artisan up
+```
+
+## 11. Оптимизация
+
+**PHP-FPM** (`/etc/php/8.3/fpm/pool.d/www.conf`, для 2 ГБ RAM):
+
+```ini
+pm = dynamic
+pm.max_children = 6
+pm.start_servers = 2
+pm.min_spare_servers = 1
+pm.max_spare_servers = 3
+```
+
+**OPcache** (`/etc/php/8.3/fpm/conf.d/99-app.ini`):
+
+```ini
+opcache.enable=1
+opcache.memory_consumption=128
+opcache.max_accelerated_files=10000
+opcache.validate_timestamps=0     ; после деплоя обязательно: systemctl reload php8.3-fpm
+expose_php=Off
+```
+
+**MySQL** (`/etc/mysql/mysql.conf.d/zz-app.cnf`, для 2 ГБ RAM):
+
+```ini
+[mysqld]
+innodb_buffer_pool_size=256M
+performance_schema=OFF
+```
+
+**Прочее**
+
+- Логи: `LOG_CHANNEL=daily` и `LOG_LEVEL=warning` не дадут одному файлу вырасти.
+- Память: следите по `free -h`, `supervisorctl status`, `systemctl status php8.3-fpm`.
+- Много стримеров (сотни): запускайте несколько воркеров `da:listen` с шардированием по `id % N`, подключите Redis для Reverb (`REVERB_SCALING_ENABLED=true`), увеличьте CPU.
+- Сырые данные донатов хранятся в `donations.raw`. Если база разрастается, добавьте команду по расписанию, которая очищает это поле у старых записей.
+- Статика (`site.css`) подключается с версией файла, поэтому кэшируется надолго и обновляется сама.
+
+## 12. Безопасность
+
+**Сервер**
+
+```bash
+ufw default deny incoming && ufw default allow outgoing
+ufw allow OpenSSH && ufw allow 80 && ufw allow 443
+ufw enable
+```
+
+- Порт 8080 наружу **не открывайте**: Reverb слушает `127.0.0.1`, доступ идёт только через nginx.
+- SSH: только по ключам. В `/etc/ssh/sshd_config`: `PasswordAuthentication no`, `PermitRootLogin no`. Работайте под отдельным пользователем с `sudo`.
+- `fail2ban` уже установлен: он блокирует перебор паролей SSH из коробки.
+- Включите автообновления безопасности: `apt install unattended-upgrades && dpkg-reconfigure -plow unattended-upgrades`.
+
+**Приложение**
+
+- `APP_DEBUG=false` и `APP_ENV=production`: иначе ошибки покажут пути и секреты.
+- Корень сайта должен указывать на `public/`, а `.env` не должен быть доступен из браузера (проверьте: `https://example.com/.env` отдаёт 404).
+- Права: код принадлежит деплой-пользователю, запись нужна только в `storage/` и `bootstrap/cache/`.
+- Админка: нестандартный логин, длинный пароль, ограничение по IP в nginx, лимит попыток входа (`throttle:5,1` уже в роутах).
+- Секреты (Client Secret DA, `REVERB_APP_SECRET`, `APP_KEY`, пароли БД) не должны попадать в git и в чаты. Если секрет где-то засветился, перевыпустите его.
+- Ограничение источников для Reverb: в `config/reverb.php` замените `'allowed_origins' => ['*']` на список ваших доменов, например `['overlays.streamelements.com', 'example.com']`. Проверьте на реальном виджете и в OBS: если виджет не подключается, посмотрите в консоли браузера, с какого Origin идёт запрос, и добавьте его.
+- HSTS: после того как убедитесь, что HTTPS работает везде, добавьте в блок HTTPS `add_header Strict-Transport-Security "max-age=31536000" always;`.
+- Токены виджета можно перевыпустить в кабинете или админке. Если подозреваете утечку, сделайте это сразу.
+
+## 13. Бэкапы и мониторинг
+
+Ежедневный бэкап БД (`crontab -e` от root):
+
+```cron
+0 3 * * * mysqldump --single-transaction da_bridge | gzip > /root/backups/da_bridge_$(date +\%F).sql.gz && find /root/backups -mtime +14 -delete
+```
+
+Раз в неделю копируйте бэкапы и **`APP_KEY`** на другой сервер или в облако (шифруйте архив: в бэкапе есть профили и данные донатов). Без `APP_KEY` бэкап токенов бесполезен.
+
+Мониторинг: бесплатный UptimeRobot или аналог на `https://example.com/up`, плюс уведомления о падении. Периодически смотрите `storage/logs/` на `DA connect failed` и `DA error`.
+
+## 14. Чек-лист перед запуском
+
+- [ ] Домен, A-запись, сертификат, редирект HTTP → HTTPS
+- [ ] `APP_DEBUG=false`, новые `REVERB_*`, новый Client Secret DA
+- [ ] Redirect URI в DA совпадает с `.env`
+- [ ] `SITE_OPERATOR` и `SITE_CONTACT_EMAIL` заполнены настоящими данными
+- [ ] Политика и условия проверены, соответствуют вашей работе и законам вашей страны
+- [ ] Порт 8080 закрыт, `ufw` включён, SSH только по ключам
+- [ ] `/admin` ограничена IP, пароль сложный
+- [ ] Supervisor: оба демона `RUNNING`, после перезагрузки сервера поднимаются сами
+- [ ] Бэкап БД настроен, `APP_KEY` сохранён отдельно
+- [ ] Проверен настоящий донат до виджета
