@@ -49,6 +49,7 @@ class DonationAlertsListener
         try {
             $token = $this->api->validToken($s);
             $user  = $this->api->user($token)['data'];
+            Log::info("DA step 2: user ok [{$s->name}]", ['keys' => array_keys($user)]);
         } catch (\Throwable $e) {
             $this->fail($s, $e);
             return;
@@ -56,16 +57,27 @@ class DonationAlertsListener
 
         (new Connector($this->loop))(self::WS_URL)->then(
             function (WebSocket $ws) use ($s, $user, $token) {
-                $ws->on('close', function () use ($s) {
-                    unset($this->conns[$s->id]);
-                    $this->retryAt[$s->id] = time() + 10;
-                    $s->update([
-                        'is_connected'  => false,
-                        'last_error'    => 'Соединение с DonationAlerts разорвано. Переподключаемся.',
-                        'last_error_at' => now(),
-                    ]);
-                });
-                // ...
+                try {
+                    $this->conns[$s->id] = $ws;
+
+                    $ws->on('message', fn ($m) => $this->onMessage($ws, $s, (int) $user['id'], $token, (string) $m));
+                    $ws->on('close', function () use ($s) {
+                        unset($this->conns[$s->id]);
+                        $this->retryAt[$s->id] = time() + 10;
+                        $s->update([
+                            'is_connected'  => false,
+                            'last_error'    => 'Соединение с DonationAlerts разорвано. Переподключаемся.',
+                            'last_error_at' => now(),
+                        ]);
+                    });
+
+                    $ws->send(json_encode([
+                        'params' => ['token' => $user['socket_connection_token']],
+                        'id'     => 1,
+                    ]));
+                } catch (\Throwable $e) {
+                    $this->fail($s, $e);
+                }
             },
             fn ($e) => $this->fail($s, $e)
         );
@@ -105,7 +117,6 @@ class DonationAlertsListener
 
     private function onMessage(WebSocket $ws, Streamer $s, int $daId, string $token, string $raw): void
     {
-        Log::info("DA raw [{$s->name}]: ".$raw);
         try {
             $data = json_decode($raw, true);
 
