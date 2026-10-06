@@ -51,5 +51,6 @@
         <small>Сервис не связан с DonationAlerts и StreamElements. Все названия принадлежат их владельцам.</small>
     </div>
 </footer>
+@include('partials.cookie-banner')
 </body>
 </html>
