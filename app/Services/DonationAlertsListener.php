@@ -105,6 +105,7 @@ class DonationAlertsListener
 
     private function onMessage(WebSocket $ws, Streamer $s, int $daId, string $token, string $raw): void
     {
+        Log::info("DA raw [{$s->name}]: ".$raw);
         try {
             $data = json_decode($raw, true);
 
