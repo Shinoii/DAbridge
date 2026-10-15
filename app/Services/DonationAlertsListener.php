@@ -105,13 +105,15 @@ class DonationAlertsListener
                 return 'DonationAlerts временно ограничил запросы. Повторяем попытку.';
             }
             if ($code >= 500) {
-                return 'DonationAlerts временно недоступен. Повторяем попытку.';
-            }
-
-            if (preg_match('/\b(502|503|504)\b/', $e->getMessage())) {
                 return 'Сервер DonationAlerts временно недоступен. Подключимся автоматически, когда он вернётся.';
             }
         }
+
+        // ошибки WebSocket-соединения (Ratchet): текст вида "HTTP/1.1 502 Bad Gateway"
+        if (preg_match('/\b(502|503|504)\b/', $e->getMessage())) {
+            return 'Сервер DonationAlerts временно недоступен. Подключимся автоматически, когда он вернётся.';
+        }
+
         if ($e instanceof ConnectionException) {
             return 'Не удаётся связаться с DonationAlerts. Повторяем попытку.';
         }
