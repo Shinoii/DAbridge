@@ -23,10 +23,10 @@ class ListenDonationAlerts extends Command
 
         $tick = function () use ($listener) {
             try {
-                Cache::put('da_listener_heartbeat', time(), 120); // сигнал «я жив» для админки
+                Cache::put('da_listener_heartbeat', time(), 120);
                 $listener->sync();
             } catch (\Throwable $e) {
-                Log::error('DA sync failed: '.$e->getMessage());   // демон не падает из-за одной ошибки
+                Log::error('DA sync failed: '.$e->getMessage());
             }
         };
 

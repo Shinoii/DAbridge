@@ -48,7 +48,7 @@ class StreamerController extends Controller
                 'currency'    => 'RUB',
                 'amount_main' => $amount,
                 'created_at'  => now()->toIso8601String(),
-                'test'        => true,             // виджет может отличать тест от настоящего
+                'test'        => true,
             ]));
         } catch (\Throwable $e) {
             report($e);

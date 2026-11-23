@@ -20,6 +20,6 @@ class DonationReceived implements ShouldBroadcastNow
 
     public function broadcastWith(): array
     {
-        return $this->donation; // токен в payload не попадает
+        return $this->donation;
     }
 }

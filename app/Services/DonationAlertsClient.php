@@ -57,7 +57,6 @@ class DonationAlertsClient
         return $res['channels'][0]['token'];
     }
 
-    /** Возвращает валидный access token, обновляя его при необходимости. */
     public function validToken(Streamer $s): string
     {
         if ($s->token_expires_at && $s->token_expires_at->subMinutes(5)->isPast() && $s->refresh_token) {

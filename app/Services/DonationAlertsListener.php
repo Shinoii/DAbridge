@@ -187,7 +187,7 @@ class DonationAlertsListener
         );
 
         if (! $donation->wasRecentlyCreated) {
-            return; // дубль
+            return;
         }
 
         $s->increment('donations_count');
